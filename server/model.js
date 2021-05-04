@@ -1,72 +1,101 @@
 var fs = require('fs');
 
 class model {
-    static ids = 1;
-
-    constructor() {
-        this.model_id = model.ids;
+    constructor(id) {
+        this.model_id = id;
         this.upload_time = getTime();
         this.status = "pending";
-        model.ids++;
-    }
-
-    changeStatus() {
-        this.status = "ready";
     }
 
 }
 
-var models = [];
-global.anomaliesData = [];
-
 module.exports = function (app) {
     app.get('/api/model', function (req, res) {
-        for (let i = 0; i < models.length; i++) {
-            if (models[i].model_id === JSON.parse(req.query.model_id)) {
-                res.status(200);
-                res.send(JSON.stringify(models[i])).end();
+        fs.readFile('models.json','utf8',(err, data) =>{
+            if(err) throw err;
+            else {
+                const file = JSON.parse(data);
+                for (let i = 0; i < file.models.length; i++) {
+                    if (JSON.parse(file.models[i].model_id) === JSON.parse(req.query.model_id)) {
+                        res.status(200).send(JSON.stringify(file.models[i])).end();
+                        break;
+                    }
+                }
+                res.status(404).end();
             }
-        }
-        res.status(404).end();
+        })
+
     })
 
     app.post('/api/model', function (req, res) {
-        res.status(200);
-        var anomalyDetector = require('./anomalyDetector');
-        var m = new model();
-        var a = new anomalyDetector(req.query, req.body, m);
-        res.send(m).end();
-        models.push(m);
-        anomaliesData.push(a);
-        // savedData.push(data);
-        updateFile("models.csv", models);
-        updateFile("anomaliesData.csv", anomaliesData);
-        var body = req.body;
-        var keys = Object.keys(body);
-        a.learn(body, keys);
-        m.changeStatus();
-        // data=Object.assign(a,m);
-        updateFile("models.csv", models);
-        updateFile("anomaliesData.csv", anomaliesData);
-    })
+        var model_id = Date.now().toString();
+        var m = new model(model_id);
+        res.status(200).send(JSON.stringify(m)).end();
+        const data = fs.readFileSync('models.json', {encoding: 'utf8', flag: 'r'});
+        const file = JSON.parse(data);
+        file.models.push(m);
+        const json = JSON.stringify(file, null, 2);
+        fs.writeFileSync('models.json', json);
+        asyncLearn(m, req.query, req.body, model_id, Object.keys(req.body));
+    });
 
     app.delete('/api/model', function (req, res) {
-        for (let i = 0; i < models.length; i++) {
-            if (models[i].model_id === JSON.parse(req.query.model_id)) {
-                res.status(200).end();
-                models.splice(i, 1);
+        fs.readFile('models.json','utf8',(err, data) =>{
+            if(err) throw err;
+            else {
+                const file = JSON.parse(data);
+                var flag=false;
+                for (let i = 0; i < file.models.length; i++) {
+                    if (JSON.parse(file.models[i].model_id) === JSON.parse(req.query.model_id)) {
+                        flag=true;
+                        file.models.splice(i, 1);
+                        res.status(200).send("model "+JSON.parse(req.query.model_id)+" deleted").end();
+                        break;
+                    }
+                }
+                if(flag){
+                    const json = JSON.stringify(file, null, 2);
+                    fs.writeFile('models.json', json, 'utf8', (err) => {
+                        if (err) throw err;
+                    });
+                }
+                else
+                    res.status(404).send("model doesn't exists").end();
             }
-        }
-        res.status(404).end();
+        })
+        // delete also from anomaliesData file
+        fs.readFile('anomaliesData.json', 'utf8', (err, data) => {
+            if (err) throw err;
+            else {
+                const file = JSON.parse(data);
+                for (let i = 0; i < file.anomaliesData.length; i++) {
+                    if (JSON.parse(file.anomaliesData[i].model_id) === JSON.parse(req.query.model_id)) {
+                        file.anomaliesData.splice(i, 1);
+                        break;
+                    }
+                }
+                const json = JSON.stringify(file, null, 2);
+                fs.writeFile('anomaliesData.json', json, 'utf8', (err) => {
+                    if (err) throw err;
+                });
+
+            }
+        });
     })
 
 
     app.get('/api/models', function (req, res) {
-        if (models.length === 0)
-            res.status(404).end();
-        else {
-            res.send(JSON.stringify(models)).end();
-        }
+        fs.readFile('models.json','utf8',(err, data) =>{
+            if(err) throw err;
+            else {
+                const file = JSON.parse(data);
+                if (file.models.length === 0)
+                    res.status(404).send("No active models").end();
+                else
+                    res.status(200).send(JSON.stringify(file.models)).end();
+            }
+        })
+
     })
 }
 
@@ -81,18 +110,43 @@ function getTime() {
     return y + x;
 }
 
-function updateFile(file, arr) {
-    let csv = arrayToCSV(arr);
-    fs.writeFile(file, csv, function (err) {
-        if (err) throw err;
-    })
+async function asyncLearn(m, query, body, model_id, keys) {
+    var anomalyDetector = require('./anomalyDetector');
+    var a = new anomalyDetector(query, body, model_id);
+    await a.learn(body, keys);
+    updateModelsFile();
+    updateAnomaliesDataFile(a);
 }
 
-function arrayToCSV(data) {
-    let csv = data.map(row => Object.values(row));
-    csv.unshift(Object.keys(data[0]));
-    return csv.join('\r\n');
+function updateModelsFile() {
+    fs.readFile('models.json', 'utf8', (err, data) => {
+        if (err) throw err;
+        else {
+            const file = JSON.parse(data);
+            file.models[file.models.length - 1].status = "ready";
+            const json = JSON.stringify(file, null, 2);
+            fs.writeFile('models.json', json, 'utf8', (err) => {
+                if (err) throw err;
+            });
+        }
+    });
 }
+
+function updateAnomaliesDataFile(a) {
+    fs.readFile('anomaliesData.json', 'utf8', (err, data) => {
+        if (err) throw err;
+        else {
+            const file = JSON.parse(data);
+            file.anomaliesData.push(a);
+            const json = JSON.stringify(file, null, 2);
+            fs.writeFile('anomaliesData.json', json, 'utf8', (err) => {
+                if (err) throw err;
+            });
+
+        }
+    });
+}
+
 
 
 

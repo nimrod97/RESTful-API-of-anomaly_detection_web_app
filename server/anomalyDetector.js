@@ -1,15 +1,15 @@
 class anomalyDetector {
-    constructor(query, body, model) {
-        this.model = model;
+    constructor(query, body, m) {
+        this.model_id = m;
         this.model_type = Object.values(query)[0];
         this.threshold = 0.9;
         this.correlatedFeatures = [];
-        this.anomalyReports = [];
-        this.columnLen = Object.keys(body).length;
+        this.anomalies = [];
+        this.columns = Object.keys(body);
 
     }
 
-    async learn(body, keys) {
+    learn(body, keys) {
         var vals = [];
         var len = body[keys[0]].length;
         var i;
@@ -77,19 +77,34 @@ class anomalyDetector {
     }
 
     async detect(body) {
+        this.anomalies = [];
         for (let i = 0; i < this.correlatedFeatures.length; i++) {
+            let spanColumn = [];
             var x = body[this.correlatedFeatures[i].feature1];
             var y = body[this.correlatedFeatures[i].feature2];
-            for (let j = 0; j < x.length; j++) {
-                if (this.isAnomalous(x[j], y[j], this.correlatedFeatures[i])) {
-                    let d = this.correlatedFeatures[i].feature1 + "," + this.correlatedFeatures[i].feature2;
-                    let ar = {
-                        description: d,
-                        timeStep: j + 1
-                    };
-                    this.anomalyReports.push(ar);
+            let j = 0;
+            while (j < x.length) {
+                let startIndex = j + 1;
+                while (j < x.length && this.isAnomalous(x[j], y[j], this.correlatedFeatures[i])) {
+                    j++;
                 }
+                let endIndex = j + 1;
+                if (startIndex !== endIndex) {
+                    let span = [];
+                    span.push(startIndex);
+                    span.push(endIndex);
+                    spanColumn.push(span);
+                } else
+                    j++;
             }
+            let col = this.correlatedFeatures[i].feature1;
+            let toPush = {
+                [col]: spanColumn,
+                reason: spanColumn.length > 0 ? "anomaly with: " +this.correlatedFeatures[i].feature2+" using "+
+                    this.model_type+" algorithm": {}
+            };
+            this.anomalies.push(toPush);
+
         }
     }
 

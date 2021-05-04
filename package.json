@@ -10,7 +10,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.17.1"
+    "express": "^4.17.1",
+    "nodejs-unique-numeric-id-generator": "^1.0.1"
   },
   "devDependencies": {
     "json-2-csv": "^3.10.3",
